@@ -8,10 +8,44 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'widgets.dart';
 
-void main() {
+class ReceivedNotification {
+  ReceivedNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.payload,
+  });
+
+  final int id;
+  final String? title;
+  final String? body;
+  final String? payload;
+}
+
+String? selectedNotificationPayload;
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('app_icon');
+
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings,
+      onSelectNotification: (String? payload) async {
+    if (payload != null) {
+      debugPrint('notification payload: $payload');
+    }
+    selectedNotificationPayload = payload;
+  });
+
   runApp(const FlutterBlueApp());
 }
 
@@ -62,10 +96,10 @@ class BluetoothOffScreen extends StatelessWidget {
                   ?.copyWith(color: Colors.white),
             ),
             ElevatedButton(
-              child: const Text('TURN ON'),
               onPressed: Platform.isAndroid
                   ? () => FlutterBluePlus.instance.turnOn()
                   : null,
+              child: const Text('TURN ON'),
             ),
           ],
         ),
@@ -84,7 +118,6 @@ class FindDevicesScreen extends StatelessWidget {
         title: const Text('Find Devices'),
         actions: [
           ElevatedButton(
-            child: const Text('TURN OFF'),
             style: ElevatedButton.styleFrom(
               primary: Colors.black,
               onPrimary: Colors.white,
@@ -92,6 +125,7 @@ class FindDevicesScreen extends StatelessWidget {
             onPressed: Platform.isAndroid
                 ? () => FlutterBluePlus.instance.turnOff()
                 : null,
+            child: const Text('TURN OFF'),
           ),
         ],
       ),
@@ -159,9 +193,9 @@ class FindDevicesScreen extends StatelessWidget {
         builder: (c, snapshot) {
           if (snapshot.data!) {
             return FloatingActionButton(
-              child: const Icon(Icons.stop),
               onPressed: () => FlutterBluePlus.instance.stopScan(),
               backgroundColor: Colors.red,
+              child: const Icon(Icons.stop),
             );
           } else {
             return FloatingActionButton(
@@ -270,51 +304,64 @@ class DeviceScreen extends StatelessWidget {
             StreamBuilder<BluetoothDeviceState>(
               stream: device.state,
               initialData: BluetoothDeviceState.connecting,
-              builder: (c, snapshot) => ListTile(
-                leading: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    snapshot.data == BluetoothDeviceState.connected
-                        ? const Icon(Icons.bluetooth_connected)
-                        : const Icon(Icons.bluetooth_disabled),
-                    snapshot.data == BluetoothDeviceState.connected
-                        ? StreamBuilder<int>(
-                            stream: rssiStream(),
-                            builder: (context, snapshot) {
-                              return Text(
-                                  snapshot.hasData ? '${snapshot.data}dBm' : '',
-                                  style: Theme.of(context).textTheme.caption);
-                            })
-                        : Text('', style: Theme.of(context).textTheme.caption),
-                  ],
-                ),
-                title: Text(
-                    'Device is ${snapshot.data.toString().split('.')[1]}.'),
-                subtitle: Text('${device.id}'),
-                trailing: StreamBuilder<bool>(
-                  stream: device.isDiscoveringServices,
-                  initialData: false,
-                  builder: (c, snapshot) => IndexedStack(
-                    index: snapshot.data! ? 1 : 0,
-                    children: <Widget>[
-                      IconButton(
-                        icon: const Icon(Icons.refresh),
-                        onPressed: () => device.discoverServices(),
-                      ),
-                      const IconButton(
-                        icon: SizedBox(
-                          child: CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation(Colors.grey),
-                          ),
-                          width: 18.0,
-                          height: 18.0,
-                        ),
-                        onPressed: null,
-                      )
+              builder: (c, snapshot) {
+                if (snapshot.data == BluetoothDeviceState.disconnected) {
+                  _showNotification(
+                      title: 'Disconnected',
+                      body: 'Device has been disconnected');
+                } else if (snapshot.data == BluetoothDeviceState.connected) {
+                  _showNotification(
+                      title: 'Connected', body: 'Device has been connected');
+                }
+                return ListTile(
+                  leading: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      snapshot.data == BluetoothDeviceState.connected
+                          ? const Icon(Icons.bluetooth_connected)
+                          : const Icon(Icons.bluetooth_disabled),
+                      snapshot.data == BluetoothDeviceState.connected
+                          ? StreamBuilder<int>(
+                              stream: rssiStream(),
+                              builder: (context, snapshot) {
+                                return Text(
+                                    snapshot.hasData
+                                        ? '${snapshot.data}dBm'
+                                        : '',
+                                    style: Theme.of(context).textTheme.caption);
+                              })
+                          : Text('',
+                              style: Theme.of(context).textTheme.caption),
                     ],
                   ),
-                ),
-              ),
+                  title: Text(
+                      'Device is ${snapshot.data.toString().split('.')[1]}.'),
+                  subtitle: Text('${device.id}'),
+                  trailing: StreamBuilder<bool>(
+                    stream: device.isDiscoveringServices,
+                    initialData: false,
+                    builder: (c, snapshot) => IndexedStack(
+                      index: snapshot.data! ? 1 : 0,
+                      children: <Widget>[
+                        IconButton(
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () => device.discoverServices(),
+                        ),
+                        const IconButton(
+                          icon: SizedBox(
+                            width: 18.0,
+                            height: 18.0,
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation(Colors.grey),
+                            ),
+                          ),
+                          onPressed: null,
+                        )
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
             StreamBuilder<int>(
               stream: device.mtu,
@@ -350,9 +397,23 @@ class DeviceScreen extends StatelessWidget {
     });
     while (isConnected) {
       yield await device.readRssi();
-      await Future.delayed(Duration(seconds: 1));
+      await Future.delayed(const Duration(seconds: 1));
     }
     subscription.cancel();
     // Device disconnected, stopping RSSI stream
+  }
+
+  Future<void> _showNotification(
+      {required String title, required String body}) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails('your channel id', 'your channel name',
+            channelDescription: 'your channel description',
+            importance: Importance.max,
+            priority: Priority.high,
+            ticker: 'ticker');
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+    await flutterLocalNotificationsPlugin
+        .show(0, title, body, platformChannelSpecifics, payload: 'item x');
   }
 }
